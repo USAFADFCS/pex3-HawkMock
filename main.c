@@ -1,12 +1,12 @@
 /** main.c
  * ===========================================================
- * Name: _______________________, __ ___ 2026
- * Section: CS483 / ____
+ * Name: Dustin Mock, 23 Apr 2026
+ * Section: CS483 / M4
  * Project: PEX3 - Page Replacement Simulator
  * Purpose: Reads a BYU binary memory trace file and simulates
  *          LRU page replacement to measure fault rates across
  *          varying frame allocations.
- * Documentation: TBD
+ * Documentation: Used PEX slides, Google for minor library function lookups, and my DLL from CS220.
  * =========================================================== */
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,33 +67,43 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Frame size option %d: %d offset bits, %d max frames, algorithm=LRU\n",
             menuOption, offsetBits, maxFrames);
 
-    // TODO: Create your PageQueue (call pqInit, which returns a pointer)
-    //       and allocate the faults[] array.  faults[f] will hold the
-    //       total number of page faults that occur when f frames are
-    //       available.  Use calloc so all entries start at zero.
+    // Allocate the page queue at the largest frame allocation we will sim
+    PageQueue *pq = pqInit((unsigned int)maxFrames);
 
-    // Process each memory access from the trace file
-    while (!feof(ifp)) {
-        fread(&traceRecord, sizeof(p2AddrTr), 1, ifp);
+    // Difference array for range-update / point-query of faults.
+    // diff[1..maxFrames] receives +1 / -1 events; a prefix sum at
+    // output time produces faults[f] = total faults at f frames.
+    // Size = maxFrames + 2 so diff[maxFrames + 1] is in bounds.
+    long *diff = calloc((size_t)maxFrames + 2, sizeof(long));
+    if (diff == NULL) {
+        fprintf(stderr, "calloc failed for diff[%d]\n", maxFrames + 2);
+        pqFree(pq);
+        fclose(ifp);
+        exit(1);
+    }
 
+    while (fread(&traceRecord, sizeof(p2AddrTr), 1, ifp) == 1) {
         // Extract page number by shifting off the offset bits
         unsigned long pageNum = traceRecord.addr >> offsetBits;
         numAccesses++;
 
         // Print progress indicator to stderr every PROGRESS_INTERVAL accesses
-        // (also prints the last page number seen — useful for early debugging)
+        // (also prints the last page number seen - useful for early debugging)
         if ((numAccesses % PROGRESS_INTERVAL) == 0) {
             fprintf(stderr, "%lu samples read, last page: %lu\r", numAccesses, pageNum);
         }
 
-        // TODO: Call pqAccess() to simulate this memory reference.
-        //       It returns:
-        //         -1      -> page was NOT in the queue (fault for ALL frame counts)
-        //         d >= 0  -> page was at depth d from the MRU end
-        //                    (fault for any allocation with fewer than d+1 frames)
-        //
-        //       Update faults[] accordingly.
-
+        long depth = pqAccess(pq, pageNum);
+        if (depth == -1) {
+            // MISS - every frame size 1..maxFrames would have faulted
+            diff[1] += 1;
+            diff[maxFrames + 1] -= 1;
+        } else if (depth > 0) {
+            // HIT at depth d > 0 - frame sizes 1..d would have faulted
+            diff[1] += 1;
+            diff[depth + 1] -= 1;
+        }
+        // depth == 0 (already-MRU hit): every frame size holds it; no fault
     }
 
     fprintf(stderr, "\n%lu total accesses processed\n", numAccesses);
@@ -102,12 +112,19 @@ int main(int argc, char **argv) {
     printf("Total Accesses:,%lu\n", numAccesses);
     printf("Frames,Missees,Miss Rate\n");
 
-    // TODO: Loop from frame count 1 to maxFrames and print each row:
-    //       printf("%d,%lu,%f\n", frameCount, faults[frameCount],
-    //              (double)faults[frameCount] / (double)numAccesses);
-
-    // TODO: Free your PageQueue and the faults[] array,
-    //       then close the file.
+    // Convert the difference array into running fault totals on the fly.
+    // After processing N accesses with the rules above, prefix_sum(diff)[f]
+    // equals the number of accesses that would have faulted with f frames.
+    unsigned long running = 0;
+    for (int f = 1; f <= maxFrames; f++) {
+        running += (unsigned long)diff[f];
+        printf("%d,%lu,%f\n", f, running,
+            (double)running / (double)numAccesses);
+    }
+    // Cleanup: queue, difference array, file handle.
+    pqFree(pq);
+    free(diff);
+    fclose(ifp);
 
     return 0;
 }
