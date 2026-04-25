@@ -1,0 +1,8 @@
+What you need to do:
+Download the updated byutr.h (attached below)
+Replace the byutr.h in your repo with this file
+Recompile and re-run all 4 simulations
+What changes:
+Total accesses will now be 7,086,622 (previously showed ~3.5M)
+All fault counts and rates will be different
+If you've already generated CSVs or charts for your report, you will need to redo them with the new output
